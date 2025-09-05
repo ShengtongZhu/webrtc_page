@@ -1,0 +1,19 @@
+{
+  "name": "webrtc-av1-app",
+  "version": "1.0.0",
+  "description": "WebRTC application with AV1 encoding and SVC support",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js",
+    "dev": "nodemon signaling-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["webrtc", "av1", "svc", "video", "encoding"],
+  "author": "Your Name",
+  "license": "MIT"
+}
