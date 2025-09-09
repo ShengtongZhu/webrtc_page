@@ -24,71 +24,61 @@ class WebRTCAV1App {
     }
     
     initializeSignaling() {
-        // Connect to signaling server with retry logic
-        const connectWebSocket = () => {
-            try {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}`;
-                
-                console.log('🔗 Attempting to connect to signaling server:', wsUrl);
-                console.log('🔗 Current location:', window.location.href);
-                this.signalingSocket = new WebSocket(wsUrl);
-                
-                this.signalingSocket.onopen = () => {
-                    console.log('✅ WebSocket connection opened successfully!');
-                    this.isSignalingConnected = true;
-                    document.getElementById('status').textContent = '✅ Ready - Signaling connected';
-                    document.getElementById('status').style.color = '#28a745';
-                    
-                    // Enable call button if camera is already started
-                    if (this.localStream) {
-                        this.callBtn.disabled = false;
-                    }
-                };
-                
-                this.signalingSocket.onmessage = (event) => {
-                    try {
-                        const message = JSON.parse(event.data);
-                        console.log('📨 Received signaling message:', message);
-                        this.handleSignalingMessage(message);
-                    } catch (error) {
-                        console.error('Error parsing signaling message:', error);
-                    }
-                };
-                
-                this.signalingSocket.onclose = (event) => {
-                    console.log('❌ Disconnected from signaling server', event.code, event.reason);
-                    this.isSignalingConnected = false;
-                    document.getElementById('status').textContent = 'Signaling disconnected - Retrying...';
-                    document.getElementById('status').style.color = '#dc3545';
-                    
-                    // Retry connection after 3 seconds
-                    setTimeout(connectWebSocket, 3000);
-                };
-                
-                this.signalingSocket.onerror = (error) => {
-                    console.error('❌ WebSocket error occurred:', error);
-                    console.error('❌ WebSocket readyState:', this.signalingSocket.readyState);
-                    console.error('❌ Error details:', {
-                        type: error.type,
-                        target: error.target,
-                        timeStamp: error.timeStamp
-                    });
-                    document.getElementById('status').textContent = '❌ Signaling connection failed';
-                    document.getElementById('status').style.color = '#dc3545';
-                };
-                
-            } catch (error) {
-                console.error('Failed to create WebSocket:', error);
-                document.getElementById('status').textContent = 'Failed to connect to signaling server';
+        const connect = () => {
+            this.signalingSocket = new WebSocket('ws://localhost:3000');
+            
+            this.signalingSocket.onopen = () => {
+                console.log('✅ Signaling connected');
+                this.isSignalingConnected = true;
+                if (this.localStream) {
+                    this.callBtn.disabled = false;
+                }
+                document.getElementById('status').textContent = 'Signaling connected - Start your camera';
+                document.getElementById('status').style.color = '#ffc107';
+            };
+            
+            this.signalingSocket.onclose = () => {
+                console.log('❌ Signaling disconnected');
+                this.isSignalingConnected = false;
+                this.callBtn.disabled = true;
+                document.getElementById('status').textContent = 'Signaling disconnected - Retrying...';
                 document.getElementById('status').style.color = '#dc3545';
-                
-                // Retry after 5 seconds
-                setTimeout(connectWebSocket, 5000);
-            }
+                setTimeout(connect, 3000);
+            };
+            
+            this.signalingSocket.onmessage = async (event) => {
+                try {
+                    let data = event.data;
+                    if (data instanceof Blob) {
+                        data = await data.text();
+                    }
+                    const message = JSON.parse(data);
+                    console.log('📨 Received signaling message:', message.type);
+                    
+                    switch (message.type) {
+                        case 'offer':
+                            await this.handleOffer(message.sdp);
+                            break;
+                        case 'answer':
+                            await this.handleAnswer(message.sdp);
+                            break;
+                        case 'ice-candidate':
+                            await this.handleIceCandidate(message.candidate);
+                            break;
+                        default:
+                            console.log('❓ Unknown message type:', message.type);
+                    }
+                } catch (error) {
+                    console.error('❌ Error parsing signaling message:', error);
+                }
+            };
+            
+            this.signalingSocket.onerror = (error) => {
+                console.error('❌ Signaling error:', error);
+            };
         };
         
-        connectWebSocket();
+        connect();
     }
     
     preferAV1Codec(sdp) {
@@ -408,67 +398,43 @@ class WebRTCAV1App {
         }
         
         try {
-            const params = sender.getParameters();
+            let params = sender.getParameters();
             console.log('📋 Current sender parameters:', JSON.stringify(params, null, 2));
             
             // Get UI values
             const bitrate = parseInt(document.getElementById('bitrate').value) * 1000;
+            const framerate = parseInt(document.getElementById('framerate').value);
             const enableSvc = document.getElementById('enableSvc').checked;
             const spatialLayers = parseInt(document.getElementById('spatialLayers').value);
+            const temporalLayers = parseInt(document.getElementById('temporalLayers').value);
             
-            // Ensure encodings array exists
+            // Ensure encodings exist (should be at least 1)
             if (!params.encodings || params.encodings.length === 0) {
                 params.encodings = [{}];
             }
             
-            // Create a clean copy of parameters to avoid read-only field issues
-            const newParams = {
-                transactionId: params.transactionId,
-                encodings: []
-            };
+            // Modify the first (and only) encoding
+            const encoding = params.encodings[0];
             
-            if (enableSvc && spatialLayers > 1) {
-                // Configure SVC with multiple spatial layers
-                for (let i = 0; i < spatialLayers; i++) {
-                    const layerBitrate = Math.floor(bitrate * (0.4 + (i * 0.3)));
-                    const encoding = {
-                        rid: `s${i}`,
-                        maxBitrate: layerBitrate,
-                        scaleResolutionDownBy: Math.pow(2, spatialLayers - 1 - i)
-                    };
-                    
-                    // Only add active property if it exists in original
-                    if (params.encodings[0] && 'active' in params.encodings[0]) {
-                        encoding.active = true;
-                    }
-                    
-                    newParams.encodings.push(encoding);
-                }
-                console.log(`✅ SVC configured with ${spatialLayers} spatial layers`);
+            // Set bitrate and framerate
+            encoding.maxBitrate = bitrate;
+            encoding.maxFramerate = framerate;
+            
+            // Set scalability mode for SVC if enabled
+            if (enableSvc) {
+                encoding.scalabilityMode = `L${spatialLayers}T${temporalLayers}`;
+                console.log(`✅ SVC enabled with scalabilityMode: ${encoding.scalabilityMode}`);
             } else {
-                // Single layer encoding
-                const encoding = {
-                    maxBitrate: bitrate
-                };
-                
-                // Copy safe properties from original encoding if it exists
-                if (params.encodings[0]) {
-                    if ('active' in params.encodings[0]) {
-                        encoding.active = params.encodings[0].active;
-                    }
-                    if ('rid' in params.encodings[0]) {
-                        encoding.rid = params.encodings[0].rid;
-                    }
-                }
-                
-                newParams.encodings.push(encoding);
-                console.log(`✅ Single layer bitrate configured: ${bitrate / 1000}kbps`);
+                delete encoding.scalabilityMode;
+                console.log('✅ Standard single-layer encoding configured');
             }
             
-            console.log('📋 New parameters to apply:', JSON.stringify(newParams, null, 2));
+            // Ensure active is true
+            encoding.active = true;
             
-            // Apply parameters with proper error handling
-            await sender.setParameters(newParams);
+            console.log('📋 New parameters to apply:', JSON.stringify(params, null, 2));
+            
+            await sender.setParameters(params);
             console.log('✅ Encoding parameters applied successfully');
             
         } catch (error) {
@@ -478,20 +444,6 @@ class WebRTCAV1App {
                 message: error.message,
                 stack: error.stack
             });
-            
-            // Try a simpler approach if the complex one fails
-            try {
-                const simpleParams = sender.getParameters();
-                if (simpleParams.encodings && simpleParams.encodings.length > 0) {
-                    const bitrate = parseInt(document.getElementById('bitrate').value) * 1000;
-                    simpleParams.encodings[0].maxBitrate = bitrate;
-                    await sender.setParameters(simpleParams);
-                    console.log('✅ Fallback: Simple bitrate configuration applied');
-                }
-            } catch (fallbackError) {
-                console.error('❌ Fallback encoding configuration also failed:', fallbackError);
-                console.log('⚠️ Continuing with browser default encoding settings');
-            }
         }
     }
     
