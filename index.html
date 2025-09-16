@@ -31,6 +31,29 @@
                 <!-- intentionally no hang up button -->
             </div>
     
+            <!-- Camera Settings -->
+            <div class="control-group">
+                <h3>Camera Settings</h3>
+
+                <div class="parameter">
+                    <label for="resolutionSelect">Resolution:</label>
+                    <select id="resolutionSelect">
+                        <option value="auto">Auto</option>
+                    </select>
+                </div>
+
+                <div class="parameter">
+                    <label for="fpsSelect">Frame Rate:</label>
+                    <select id="fpsSelect">
+                        <option value="auto">Auto</option>
+                    </select>
+                </div>
+
+                <div class="parameter">
+                    <small>Capabilities: <span id="cameraCaps">-</span></small>
+                </div>
+            </div>
+    
             <!-- SVC Parameters -->
             <div class="control-group">
                 <h3>SVC (Scalable Video Coding) Parameters</h3>

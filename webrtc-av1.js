@@ -14,6 +14,10 @@ class WebRTCAV1App {
         this.inCall = false;
         this.previousStats = null;
         
+        // Camera setting selects
+        this.resolutionSelect = document.getElementById('resolutionSelect');
+        this.fpsSelect = document.getElementById('fpsSelect');
+        
         // Initialize WebSocket connection with retry
         this.initializeSignaling();
         
@@ -167,14 +171,31 @@ class WebRTCAV1App {
     }
     
     // Method: initializeParameterControls
+    // Class: WebRTCAV1App
+    // Method: initializeParameterControls
     initializeParameterControls() {
-        
-        // SVC controls only
         const enableSvcCheckbox = document.getElementById('enableSvc');
         const spatialLayersSlider = document.getElementById('spatialLayers');
         const spatialLayersValue = document.getElementById('spatialLayersValue');
         const temporalLayersSlider = document.getElementById('temporalLayers');
         const temporalLayersValue = document.getElementById('temporalLayersValue');
+        
+        if (this.resolutionSelect) {
+            this.resolutionSelect.addEventListener('change', async () => {
+                if (this.inCall) return; // lock after call starts
+                if (this.localStream) {
+                    await this.applySelectedCameraConstraints();
+                }
+            });
+        }
+        if (this.fpsSelect) {
+            this.fpsSelect.addEventListener('change', async () => {
+                if (this.inCall) return; // lock after call starts
+                if (this.localStream) {
+                    await this.applySelectedCameraConstraints();
+                }
+            });
+        }
         
         if (spatialLayersSlider && spatialLayersValue) {
             spatialLayersValue.textContent = spatialLayersSlider.value;
@@ -240,33 +261,48 @@ class WebRTCAV1App {
     async startCamera() {
         try {
             console.log('📹 Starting camera...');
-            
-            // Request a higher resolution to allow for more SVC layers
+    
+            // Build constraints from UI (use 'ideal' to allow browser negotiation)
+            const videoConstraints = {};
+            if (this.resolutionSelect && this.resolutionSelect.value !== 'auto') {
+                const [w, h] = this.resolutionSelect.value.split('x').map(v => parseInt(v, 10));
+                if (!isNaN(w) && !isNaN(h)) {
+                    videoConstraints.width = { ideal: w };
+                    videoConstraints.height = { ideal: h };
+                }
+            }
+            if (this.fpsSelect && this.fpsSelect.value !== 'auto') {
+                const fps = parseFloat(this.fpsSelect.value);
+                if (!isNaN(fps)) {
+                    videoConstraints.frameRate = { ideal: fps };
+                }
+            }
+    
             const constraints = {
-                video: {
-                    width: 1280 ,
-                    height: 720 
-                },
+                video: Object.keys(videoConstraints).length ? videoConstraints : true,
                 audio: true
             };
-            
+    
             this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
             this.localVideo.srcObject = this.localStream;
-            
+    
             // Log the actual resolution to see what the camera provides
             const videoTrack = this.localStream.getVideoTracks()[0];
             const settings = videoTrack.getSettings();
-            console.log(`📹 Camera started with resolution: ${settings.width}x${settings.height}`);
-            
+            console.log(`📹 Camera started with resolution: ${settings.width}x${settings.height}, ${settings.frameRate || '-'} fps`);
+    
+            // Populate capability info and dropdowns based on real camera capabilities
+            this.populateCameraOptions(videoTrack);
+    
             this.startBtn.disabled = true;
             if (this.isSignalingConnected) {
                 this.callBtn.disabled = false;
             }
-            
+    
             console.log('✅ Camera started successfully');
             document.getElementById('status').textContent = 'Camera ready - You can start a call';
             document.getElementById('status').style.color = '#28a745';
-            
+    
         } catch (error) {
             console.error('❌ Error accessing camera:', error);
             document.getElementById('status').textContent = `Camera error: ${error.message}`;
@@ -653,6 +689,7 @@ class WebRTCAV1App {
         this.setSvcControlsDisabled(true);
     }
     
+    // Class: WebRTCAV1App
     setSvcControlsDisabled(disabled) {
         const enableSvcCheckbox = document.getElementById('enableSvc');
         const spatialLayersSlider = document.getElementById('spatialLayers');
@@ -660,7 +697,109 @@ class WebRTCAV1App {
         if (enableSvcCheckbox) enableSvcCheckbox.disabled = disabled;
         if (spatialLayersSlider) spatialLayersSlider.disabled = disabled;
         if (temporalLayersSlider) temporalLayersSlider.disabled = disabled;
+    
+        // Also lock camera resolution/fps after call starts
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const fpsSelect = document.getElementById('fpsSelect');
+        if (resolutionSelect) resolutionSelect.disabled = disabled;
+        if (fpsSelect) fpsSelect.disabled = disabled;
     }
+
+    async applySelectedCameraConstraints() {
+        try {
+            const track = this.localStream.getVideoTracks()[0];
+            if (!track) return;
+        
+            const constraints = {};
+            if (this.resolutionSelect && this.resolutionSelect.value !== 'auto') {
+                const [w, h] = this.resolutionSelect.value.split('x').map(v => parseInt(v, 10));
+                if (!isNaN(w) && !isNaN(h)) {
+                    constraints.width = { ideal: w };
+                    constraints.height = { ideal: h };
+                }
+            }
+            if (this.fpsSelect && this.fpsSelect.value !== 'auto') {
+                const fps = parseFloat(this.fpsSelect.value);
+                if (!isNaN(fps)) {
+                    constraints.frameRate = { ideal: fps };
+                }
+            }
+        
+            console.log('🔁 Applying camera constraints:', constraints);
+            await track.applyConstraints(constraints);
+        
+            const settings = track.getSettings();
+            console.log(`✅ Applied camera settings: ${settings.width}x${settings.height}, ${settings.frameRate || '-'} fps`);
+        } catch (err) {
+            console.error('❌ Failed to apply camera constraints:', err);
+        }
+    }
+
+    populateCameraOptions(videoTrack) {
+        if (!videoTrack || !videoTrack.getCapabilities) {
+            console.warn('⚠️ Video track capabilities not available');
+            return;
+        }
+        
+        const caps = videoTrack.getCapabilities();
+        const capsText = [
+            `width ${caps.width ? `${caps.width.min}-${caps.width.max}` : '-'}`,
+            `height ${caps.height ? `${caps.height.min}-${caps.height.max}` : '-'}`,
+            `fps ${caps.frameRate ? `${Math.round(caps.frameRate.min)}-${Math.round(caps.frameRate.max)}` : '-'}`
+        ].join(', ');
+        const capsEl = document.getElementById('cameraCaps');
+        if (capsEl) capsEl.textContent = capsText;
+        
+        // Generate sensible resolution presets and filter by capability ranges
+        const resolutionPresets = [
+            '320x240', '640x360', '640x480', '960x540', '1024x576',
+            '1280x720', '1280x960', '1920x1080', '2560x1440', '3840x2160'
+        ];
+        const withinRange = (w, h) => {
+            const wOk = !caps.width || (caps.width.min <= w && w <= caps.width.max);
+            const hOk = !caps.height || (caps.height.min <= h && h <= caps.height.max);
+            return wOk && hOk;
+        };
+        
+        if (this.resolutionSelect) {
+            const prev = this.resolutionSelect.value;
+            this.resolutionSelect.innerHTML = '';
+            const addOpt = (val, label) => {
+                const o = document.createElement('option');
+                o.value = val; o.textContent = label;
+                this.resolutionSelect.appendChild(o);
+            };
+            addOpt('auto', 'Auto');
+            const filtered = resolutionPresets.filter(r => {
+                const [w, h] = r.split('x').map(n => parseInt(n, 10));
+                return withinRange(w, h);
+            });
+            filtered.forEach(r => addOpt(r, r));
+            if ([...this.resolutionSelect.options].some(o => o.value === prev)) {
+                this.resolutionSelect.value = prev;
+            }
+        }
+        
+        if (this.fpsSelect) {
+            const prev = this.fpsSelect.value;
+            this.fpsSelect.innerHTML = '';
+            const addOpt = (val, label) => {
+                const o = document.createElement('option');
+                o.value = val; o.textContent = label;
+                this.fpsSelect.appendChild(o);
+            };
+            addOpt('auto', 'Auto');
+            const fpsCandidates = [15, 24, 30, 60, 90, 120];
+            fpsCandidates.forEach(f => {
+                const ok = !caps.frameRate || (caps.frameRate.min <= f && f <= caps.frameRate.max);
+                if (ok) addOpt(String(f), `${f} fps`);
+            });
+            if ([...this.fpsSelect.options].some(o => o.value === prev)) {
+                this.fpsSelect.value = prev;
+            }
+        }
+    }
+
 }
 
 // Initialize the application
