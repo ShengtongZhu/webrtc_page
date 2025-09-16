@@ -28,77 +28,30 @@
                 <h3>Connection Controls</h3>
                 <button id="startBtn">Start Camera</button>
                 <button id="callBtn" disabled>Start Call</button>
-                <button id="hangupBtn" disabled>Hang Up</button>
+                <!-- intentionally no hang up button -->
             </div>
-
-            <!-- AV1 Encoding Parameters -->
-            <div class="control-group">
-                <h3>AV1 Encoding Parameters</h3>
-                
-                <div class="parameter">
-                    <label for="bitrate">Bitrate (kbps):</label>
-                    <input type="range" id="bitrate" min="100" max="5000" value="1000">
-                    <span id="bitrateValue">1000</span>
-                </div>
-
-                <div class="parameter">
-                    <label for="framerate">Frame Rate (fps):</label>
-                    <input type="range" id="framerate" min="15" max="60" value="30">
-                    <span id="framerateValue">30</span>
-                </div>
-
-                <div class="parameter">
-                    <label for="resolution">Resolution:</label>
-                    <select id="resolution">
-                        <option value="640x480">640x480</option>
-                        <option value="1280x720" selected>1280x720</option>
-                        <option value="1920x1080">1920x1080</option>
-                    </select>
-                </div>
-            </div>
-
+    
             <!-- SVC Parameters -->
             <div class="control-group">
                 <h3>SVC (Scalable Video Coding) Parameters</h3>
                 
                 <div class="parameter">
                     <label for="spatialLayers">Spatial Layers:</label>
-                    <input type="range" id="spatialLayers" min="1" max="3" value="2">
-                    <span id="spatialLayersValue">2</span>
+                    <input type="range" id="spatialLayers" min="1" max="3" value="3">
+                    <span id="spatialLayersValue">3</span>
                 </div>
-
+    
                 <div class="parameter">
                     <label for="temporalLayers">Temporal Layers:</label>
-                    <input type="range" id="temporalLayers" min="1" max="3" value="2">
-                    <span id="temporalLayersValue">2</span>
+                    <input type="range" id="temporalLayers" min="1" max="3" value="3">
+                    <span id="temporalLayersValue">3</span>
                 </div>
-
+    
                 <div class="parameter">
                     <label>
                         <input type="checkbox" id="enableSvc" checked>
                         Enable SVC
                     </label>
-                </div>
-            </div>
-
-            <!-- Advanced AV1 Parameters -->
-            <div class="control-group">
-                <h3>Advanced AV1 Parameters</h3>
-                
-                <div class="parameter">
-                    <label for="keyFrameInterval">Key Frame Interval (seconds):</label>
-                    <input type="range" id="keyFrameInterval" min="1" max="10" value="4">
-                    <span id="keyFrameIntervalValue">4</span>
-                </div>
-
-                <div class="parameter">
-                    <label for="adaptiveBitrate">Adaptive Bitrate:</label>
-                    <select id="adaptiveBitrate">
-                        <option value="disabled">Disabled</option>
-                        <option value="maintain-framerate" selected>Maintain Framerate</option>
-                        <option value="maintain-resolution">Maintain Resolution</option>
-                        <option value="balanced">Balanced</option>
-                    </select>
                 </div>
             </div>
         </div>
@@ -115,6 +68,10 @@
                 <div>Resolution: <span id="currentResolution">-</span></div>
                 <div>Frame Rate: <span id="currentFramerate">-</span></div>
                 <div>Packet Loss: <span id="packetLoss">-</span></div>
+                <div class="stat-item">
+                    <strong>Scalability Mode:</strong>
+                    <span id="scalabilityModeInfo">-</span>
+                </div>
             </div>
         </div>
     </div>

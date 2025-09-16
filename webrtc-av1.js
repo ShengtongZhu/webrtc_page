@@ -4,7 +4,6 @@ class WebRTCAV1App {
         this.remoteVideo = document.getElementById('remoteVideo');
         this.startBtn = document.getElementById('startBtn');
         this.callBtn = document.getElementById('callBtn');
-        this.hangupBtn = document.getElementById('hangupBtn');
         
         this.localStream = null;
         this.remoteStream = null;
@@ -12,6 +11,8 @@ class WebRTCAV1App {
         this.isInitiator = false;
         this.signalingSocket = null;
         this.isSignalingConnected = false;
+        this.inCall = false;
+        this.previousStats = null;
         
         // Initialize WebSocket connection with retry
         this.initializeSignaling();
@@ -25,7 +26,7 @@ class WebRTCAV1App {
     
     initializeSignaling() {
         const connect = () => {
-            this.signalingSocket = new WebSocket('ws://localhost:3000');
+            this.signalingSocket = new WebSocket('ws://192.168.80.99:3000');
             
             this.signalingSocket.onopen = () => {
                 console.log('✅ Signaling connected');
@@ -57,9 +58,11 @@ class WebRTCAV1App {
                     
                     switch (message.type) {
                         case 'offer':
+                            console.log('📥 Received SDP offer:\n', message.sdp?.sdp || message.sdp);
                             await this.handleOffer(message.sdp);
                             break;
                         case 'answer':
+                            console.log('📥 Received SDP answer:\n', message.sdp?.sdp || message.sdp);
                             await this.handleAnswer(message.sdp);
                             break;
                         case 'ice-candidate':
@@ -141,6 +144,11 @@ class WebRTCAV1App {
                 
                 lines[mLineIndex] = parts.slice(0, 3).join(' ') + ' ' + newPayloadTypes.join(' ');
                 console.log('✅ AV1 codec prioritized in SDP');
+                
+                // Add Dependency Descriptor extension for AV1 (insert after m=video line)
+                const ddExtLine = 'a=extmap:12 https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension';
+                lines.splice(mLineIndex + 1, 0, ddExtLine);
+                console.log('✅ Added AV1 Dependency Descriptor extension to SDP');
             }
             
             return lines.join('\n');
@@ -151,57 +159,47 @@ class WebRTCAV1App {
         }
     }
     
+    // Class: WebRTCAV1App
+    // Method: initializeEventListeners
     initializeEventListeners() {
         this.startBtn.addEventListener('click', () => this.startCamera());
         this.callBtn.addEventListener('click', () => this.startCall());
-        this.hangupBtn.addEventListener('click', () => this.hangUp());
     }
     
+    // Method: initializeParameterControls
     initializeParameterControls() {
-        // Bitrate control
-        const bitrateSlider = document.getElementById('bitrate');
-        const bitrateValue = document.getElementById('bitrateValue');
         
-        bitrateSlider.addEventListener('input', (e) => {
-            bitrateValue.textContent = e.target.value;
-            this.updateEncodingParameters();
-        });
-        
-        // Frame rate control
-        const framerateSlider = document.getElementById('framerate');
-        const framerateValue = document.getElementById('framerateValue');
-        
-        framerateSlider.addEventListener('input', (e) => {
-            framerateValue.textContent = e.target.value;
-            this.updateEncodingParameters();
-        });
-        
-        // Resolution control
-        const resolutionSelect = document.getElementById('resolution');
-        resolutionSelect.addEventListener('change', () => {
-            this.updateEncodingParameters();
-        });
-        
-        // SVC controls
+        // SVC controls only
         const enableSvcCheckbox = document.getElementById('enableSvc');
         const spatialLayersSlider = document.getElementById('spatialLayers');
         const spatialLayersValue = document.getElementById('spatialLayersValue');
         const temporalLayersSlider = document.getElementById('temporalLayers');
         const temporalLayersValue = document.getElementById('temporalLayersValue');
         
-        enableSvcCheckbox.addEventListener('change', () => {
-            this.updateEncodingParameters();
-        });
+        if (spatialLayersSlider && spatialLayersValue) {
+            spatialLayersValue.textContent = spatialLayersSlider.value;
+        }
+        if (temporalLayersSlider && temporalLayersValue) {
+            temporalLayersValue.textContent = temporalLayersSlider.value;
+        }
         
-        spatialLayersSlider.addEventListener('input', (e) => {
-            spatialLayersValue.textContent = e.target.value;
-            this.updateEncodingParameters();
-        });
-        
-        temporalLayersSlider.addEventListener('input', (e) => {
-            temporalLayersValue.textContent = e.target.value;
-            this.updateEncodingParameters();
-        });
+        if (enableSvcCheckbox) {
+            enableSvcCheckbox.addEventListener('change', () => {
+                this.updateEncodingParameters();
+            });
+        }
+        if (spatialLayersSlider && spatialLayersValue) {
+            spatialLayersSlider.addEventListener('input', (e) => {
+                spatialLayersValue.textContent = e.target.value;
+                this.updateEncodingParameters();
+            });
+        }
+        if (temporalLayersSlider && temporalLayersValue) {
+            temporalLayersSlider.addEventListener('input', (e) => {
+                temporalLayersValue.textContent = e.target.value;
+                this.updateEncodingParameters();
+            });
+        }
     }
     
     checkAV1Support() {
@@ -237,21 +235,28 @@ class WebRTCAV1App {
         }
     }
     
+    // Class: WebRTCAV1App
+    // Method: startCamera
     async startCamera() {
         try {
             console.log('📹 Starting camera...');
             
+            // Request a higher resolution to allow for more SVC layers
             const constraints = {
                 video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
+                    width: 1280 ,
+                    height: 720 
                 },
                 audio: true
             };
             
             this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
             this.localVideo.srcObject = this.localStream;
+            
+            // Log the actual resolution to see what the camera provides
+            const videoTrack = this.localStream.getVideoTracks()[0];
+            const settings = videoTrack.getSettings();
+            console.log(`📹 Camera started with resolution: ${settings.width}x${settings.height}`);
             
             this.startBtn.disabled = true;
             if (this.isSignalingConnected) {
@@ -269,6 +274,8 @@ class WebRTCAV1App {
         }
     }
     
+    // Class: WebRTCAV1App
+    // Method: startCall
     async startCall() {
         console.log('📞 START CALL BUTTON CLICKED!');
         console.log('📞 Current signaling status:', this.isSignalingConnected);
@@ -297,7 +304,7 @@ class WebRTCAV1App {
                 this.peerConnection.addTrack(track, this.localStream);
             });
             
-            // Configure AV1 encoding
+            // Configure AV1 encoding (applies scalabilityMode pre-call)
             await this.configureAV1Encoding();
             
             this.isInitiator = true;
@@ -323,7 +330,8 @@ class WebRTCAV1App {
             });
             
             this.callBtn.disabled = true;
-            this.hangupBtn.disabled = false;
+            this.inCall = true;
+            this.setSvcControlsDisabled(true);
             
             document.getElementById('status').textContent = '📞 Calling... Waiting for answer';
             document.getElementById('status').style.color = '#ffc107';
@@ -388,6 +396,7 @@ class WebRTCAV1App {
         this.startStatsMonitoring();
     }
     
+    // Method: configureAV1Encoding
     async configureAV1Encoding() {
         const sender = this.peerConnection.getSenders().find(s => 
             s.track && s.track.kind === 'video');
@@ -401,9 +410,6 @@ class WebRTCAV1App {
             let params = sender.getParameters();
             console.log('📋 Current sender parameters:', JSON.stringify(params, null, 2));
             
-            // Get UI values
-            const bitrate = parseInt(document.getElementById('bitrate').value) * 1000;
-            const framerate = parseInt(document.getElementById('framerate').value);
             const enableSvc = document.getElementById('enableSvc').checked;
             const spatialLayers = parseInt(document.getElementById('spatialLayers').value);
             const temporalLayers = parseInt(document.getElementById('temporalLayers').value);
@@ -412,27 +418,21 @@ class WebRTCAV1App {
             if (!params.encodings || params.encodings.length === 0) {
                 params.encodings = [{}];
             }
-            
-            // Modify the first (and only) encoding
             const encoding = params.encodings[0];
             
-            // Set bitrate and framerate
-            encoding.maxBitrate = bitrate;
-            encoding.maxFramerate = framerate;
-            
-            // Set scalability mode for SVC if enabled
-            if (enableSvc) {
-                encoding.scalabilityMode = `L${spatialLayers}T${temporalLayers}`;
-                console.log(`✅ SVC enabled with scalabilityMode: ${encoding.scalabilityMode}`);
+            if (!this.inCall) {
+                if (enableSvc) {
+                    encoding.scalabilityMode = `L${spatialLayers}T${temporalLayers}`;
+                    console.log(`✅ SVC enabled with scalabilityMode: ${encoding.scalabilityMode}`);
+                } else {
+                    delete encoding.scalabilityMode;
+                    console.log('✅ Standard single-layer encoding configured');
+                }
             } else {
-                delete encoding.scalabilityMode;
-                console.log('✅ Standard single-layer encoding configured');
+                console.log('ℹ️ In call: keeping existing scalabilityMode unchanged');
             }
             
-            // Ensure active is true
             encoding.active = true;
-            
-            console.log('📋 New parameters to apply:', JSON.stringify(params, null, 2));
             
             await sender.setParameters(params);
             console.log('✅ Encoding parameters applied successfully');
@@ -469,49 +469,80 @@ class WebRTCAV1App {
     
     updateStatsDisplay(stats) {
         let codecInfo = '-';
-        let bitrate = '-';
-        let resolution = '-';
-        let framerate = '-';
+        let totalBitrate = 0;
+        let mainResolution = '-';
+        let mainFramerate = '-';
         let packetLoss = '-';
-        
+        let scalabilityMode = '-';
+
+        const outboundRtpReports = [];
         stats.forEach(report => {
             if (report.type === 'outbound-rtp' && report.kind === 'video') {
-                if (report.codecId) {
-                    stats.forEach(codecReport => {
-                        if (codecReport.id === report.codecId) {
-                            codecInfo = codecReport.mimeType || 'Unknown';
-                        }
-                    });
-                }
-                
-                if (report.bytesSent && report.timestamp) {
-                    // Calculate bitrate (this is simplified)
-                    bitrate = Math.round((report.bytesSent * 8) / 1000) + ' kbps';
-                }
-                
-                if (report.frameWidth && report.frameHeight) {
-                    resolution = `${report.frameWidth}x${report.frameHeight}`;
-                }
-                
-                if (report.framesPerSecond) {
-                    framerate = report.framesPerSecond + ' fps';
-                }
+                outboundRtpReports.push(report);
             }
-            
             if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                if (report.packetsLost && report.packetsReceived) {
-                    const lossRate = (report.packetsLost / 
-                        (report.packetsLost + report.packetsReceived)) * 100;
+                if (report.packetsLost && report.packetsReceived && (report.packetsLost + report.packetsReceived) > 0) {
+                    const lossRate = (report.packetsLost / (report.packetsLost + report.packetsReceived)) * 100;
                     packetLoss = lossRate.toFixed(2) + '%';
                 }
             }
         });
-        
+
+        if (outboundRtpReports.length > 0) {
+            // Get codec info from the first report
+            const firstReport = outboundRtpReports[0];
+            if (firstReport.codecId) {
+                const codec = stats.get(firstReport.codecId);
+                if (codec) {
+                    codecInfo = codec.mimeType || 'Unknown';
+                    if (codec.sdpFmtpLine) {
+                        codecInfo += ` (${codec.sdpFmtpLine})`;
+                    }
+                }
+            }
+
+            let highestResolution = 0;
+            
+            for (const report of outboundRtpReports) {
+                if (report.scalabilityMode) {
+                    scalabilityMode = report.scalabilityMode;
+                }
+
+                if (this.previousStats) {
+                    const prevReport = this.previousStats.get(report.id);
+                    if (prevReport) {
+                        const bytesSent = report.bytesSent - prevReport.bytesSent;
+                        const timeDiff = (report.timestamp - prevReport.timestamp) / 1000;
+
+                        // Only calculate bitrate for active layers sending data
+                        if (timeDiff > 0 && bytesSent > 0) {
+                            const layerBitrate = Math.round((bytesSent * 8) / timeDiff);
+                            totalBitrate += layerBitrate;
+                        }
+                    }
+                }
+
+                const currentResolution = (report.frameWidth || 0) * (report.frameHeight || 0);
+                if (currentResolution > highestResolution) {
+                    highestResolution = currentResolution;
+                    mainResolution = `${report.frameWidth}x${report.frameHeight}`;
+                    mainFramerate = `${report.framesPerSecond || '-'} fps`;
+                }
+            }
+        }
+
         document.getElementById('codecInfo').textContent = codecInfo;
-        document.getElementById('currentBitrate').textContent = bitrate;
-        document.getElementById('currentResolution').textContent = resolution;
-        document.getElementById('currentFramerate').textContent = framerate;
+        document.getElementById('currentBitrate').textContent = `${Math.round(totalBitrate / 1000)} kbps`;
+        document.getElementById('currentResolution').textContent = mainResolution;
+        document.getElementById('currentFramerate').textContent = mainFramerate;
         document.getElementById('packetLoss').textContent = packetLoss;
+
+        const scalabilityModeEl = document.getElementById('scalabilityModeInfo');
+        if (scalabilityModeEl) {
+            scalabilityModeEl.textContent = scalabilityMode;
+        }
+
+        this.previousStats = stats;
     }
     
     sendSignalingMessage(message) {
@@ -541,10 +572,6 @@ class WebRTCAV1App {
                 case 'ice-candidate':
                     console.log('📨 Received ICE candidate');
                     await this.handleIceCandidate(message.candidate);
-                    break;
-                case 'hangup':
-                    console.log('📨 Received hangup');
-                    this.hangUp();
                     break;
                 default:
                     console.log('❓ Unknown message type:', message.type);
@@ -599,19 +626,11 @@ class WebRTCAV1App {
         });
         
         this.callBtn.disabled = true;
-        this.hangupBtn.disabled = false;
+        this.inCall = true;
+        this.setSvcControlsDisabled(true);
         
         document.getElementById('status').textContent = '📞 Call connected';
         document.getElementById('status').style.color = '#28a745';
-    }
-    
-    async handleAnswer(answer) {
-        console.log('📨 Processing answer...');
-        
-        // Modify answer SDP for AV1
-        answer.sdp = this.preferAV1Codec(answer.sdp);
-        
-        await this.peerConnection.setRemoteDescription(answer);
     }
     
     async handleIceCandidate(candidate) {
@@ -622,28 +641,25 @@ class WebRTCAV1App {
         }
     }
     
-    hangUp() {
-        console.log('📞 Hanging up call');
+    // Class: WebRTCAV1App
+    async handleAnswer(answer) {
+        console.log('📨 Processing answer...');
         
-        // Send hangup message
-        this.sendSignalingMessage({ type: 'hangup' });
+        // Modify answer SDP for AV1
+        answer.sdp = this.preferAV1Codec(answer.sdp);
         
-        // Close peer connection
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
-        
-        // Reset UI
-        this.callBtn.disabled = this.localStream ? false : true;
-        this.hangupBtn.disabled = true;
-        this.isInitiator = false;
-        
-        // Clear remote video
-        this.remoteVideo.srcObject = null;
-        
-        document.getElementById('status').textContent = 'Call ended';
-        document.getElementById('status').style.color = '#6c757d';
+        await this.peerConnection.setRemoteDescription(answer);
+        this.inCall = true;
+        this.setSvcControlsDisabled(true);
+    }
+    
+    setSvcControlsDisabled(disabled) {
+        const enableSvcCheckbox = document.getElementById('enableSvc');
+        const spatialLayersSlider = document.getElementById('spatialLayers');
+        const temporalLayersSlider = document.getElementById('temporalLayers');
+        if (enableSvcCheckbox) enableSvcCheckbox.disabled = disabled;
+        if (spatialLayersSlider) spatialLayersSlider.disabled = disabled;
+        if (temporalLayersSlider) temporalLayersSlider.disabled = disabled;
     }
 }
 
